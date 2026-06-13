@@ -1,91 +1,79 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
-package com.mycompany.servidorsemaforo;;
+package com.mycompany.servidorsemaforo;
 
+import javafx.application.Platform;
+import javafx.scene.control.ListView;
 import java.io.*;
 import java.net.*;
 import java.util.*;
 
-/**
- *
- * @author Romero
- */
-public class MultiploServidor {
+public class MultiploServidor implements Runnable {
+
     static List<ClientHandler> ar = new ArrayList<>();
-    static int i = 0;
-    
-    public static void main(String[] args) throws IOException {
-        
-        ServerSocket ss = new ServerSocket(1234);
-        Socket s;
-        System.out.println("À espera de conexões.");
-        while(true){
-            s = ss.accept();
-            System.out.println("Cliente "+ i + " conectou: " + s);
-            DataInputStream dis = new DataInputStream(s.getInputStream());
-            DataOutputStream dos = new DataOutputStream(s.getOutputStream());
+    private ListView<String> clientListView;
 
-            ClientHandler mtch = new ClientHandler(s, "client"+i, dis, dos);
-
-            Thread t = new Thread(mtch);
-
-            ar.add(mtch);
-
-            t.start();
-            i++;
-    }
+    public MultiploServidor(ListView<String> listView) {
+        this.clientListView = listView;
     }
 
-    private static class ClientHandler implements Runnable {
+    @Override
+    public void run() {
+        try {
+            ServerSocket ss = new ServerSocket(1234);
+            int i = 0;
+            while (true) {
+                Socket s = ss.accept();
+                DataInputStream dis = new DataInputStream(s.getInputStream());
+                DataOutputStream dos = new DataOutputStream(s.getOutputStream());
+                ClientHandler ch = new ClientHandler(s, "client" + i, dis, dos);
+                ar.add(ch);
+                atualizarLista();
+                new Thread(ch).start();
+                i++;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    void atualizarLista() {
+        Platform.runLater(() -> {
+            clientListView.getItems().clear();
+            for (ClientHandler c : ar)
+                clientListView.getItems().add(c.name + " — " + c.s.getInetAddress());
+        });
+    }
+
+    class ClientHandler implements Runnable {
         final DataInputStream dis;
         final DataOutputStream dos;
         final Socket s;
-        private String name;
-        boolean isLoggedin;
+        String name;
 
-        private ClientHandler(Socket s, String string, DataInputStream dis, DataOutputStream dos) {
+        ClientHandler(Socket s, String name, DataInputStream dis, DataOutputStream dos) {
             this.s = s;
+            this.name = name;
             this.dis = dis;
             this.dos = dos;
-            this.name = string;
-            this.isLoggedin = true;
         }
 
         @Override
         public void run() {
-            try {
-                dos.writeUTF("Conetado (" + this.name + ")");
-            } catch(IOException e) {};
-            String recebido;
-            while(true){
+            try { dos.writeUTF("Conectado (" + name + ")"); } catch (IOException e) {}
+            while (true) {
                 try {
-                    recebido = dis.readUTF();
-                    System.out.println(recebido);
-                    if(recebido.equals("logout")){
-                        this.isLoggedin = false;
-                        this.s.close();
+                    String msg = dis.readUTF();
+                    if (msg.equals("logout")) {
                         ar.remove(this);
-                        for(ClientHandler mc:ar)
-                            mc.dos.writeUTF(this.name + " desconectou.");
-                        System.out.println(this.name + " desconectou.");
+                        s.close();
+                        atualizarLista();
+                        for (ClientHandler c : ar)
+                            try { c.dos.writeUTF(name + " desconectou."); } catch (IOException e) {}
                         break;
                     }
-                    
-                    for(ClientHandler mc:ar){
-                        if(!mc.name.equals(this.name))
-                            mc.dos.writeUTF(this.name + ": "+ recebido);
-                    }
-                } catch (IOException e) {
-                    e.getMessage();
-                }
-            }
-            try {
-                this.dis.close();
-                this.dos.close();
-            } catch (IOException e) {
+                    for (ClientHandler c : ar)
+                        if (!c.name.equals(name))
+                            try { c.dos.writeUTF(name + ": " + msg); } catch (IOException e) {}
+                } catch (IOException e) { break; }
             }
         }
     }
